@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Color Gradient</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            position: relative;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            max-width: 250px;
+            backdrop-filter: blur(5px);
+        }
+        #ui h2 {
+            margin-top: 0;
+            font-size: 18px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            padding-bottom: 8px;
+        }
+        .control-group {
+            margin-bottom: 12px;
+        }
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 14px;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        button.active {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        .value-display {
+            font-size: 12px;
+            opacity: 0.7;
+            text-align: right;
+        }
+        #toggle-ui {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 100;
+        }
+    </style>
+
+<base target="_self">
+
+
+    <div id="canvas-container">
+        <button id="toggle-ui">☰</button>
+        <div id="ui">
+            <h2>Gradient Controls</h2>
+            
+            <div class="control-group">
+                <label for="palette">Color Palette</label>
+                <div>
+                    <button id="vibrant" class="active">Vibrant</button>
+                    <button id="muted">Muted</button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label for="saturation">Saturation <span class="value-display" id="saturation-value">1.0</span></label>
+                <input type="range" id="saturation" min="0" max="2" step="0.1" value="1.0">
+            </div>
+            
+            <div class="control-group">
+                <label for="speed">Animation Speed <span class="value-display" id="speed-value">0.5</span></label>
+                <input type="range" id="speed" min="0" max="1" step="0.1" value="0.5">
+            </div>
+            
+            <div class="control-group">
+                <label for="ripple">Ripple Effect <span class="value-display" id="ripple-value">0.0</span></label>
+                <input type="range" id="ripple" min="0" max="1" step="0.1" value="0.0">
+            </div>
+            
+            <div class="control-group">
+                <label for="harmony">Color Harmony</label>
+                <div>
+                    <button id="complementary" class="active">Complementary</button>
+                    <button id="analogous">Analogous</button>
+                    <button id="triadic">Triadic</button>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <label for="zoom">Zoom <span class="value-display" id="zoom-value">1.0</span></label>
+                <input type="range" id="zoom" min="0.1" max="5" step="0.1" value="1.0">
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
+    <script>
+        // Check for WebGL support
+        if (!WebGLRenderingContext) {
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = '<div style="color: white; text-align: center; padding: 20px;">Your browser does not support WebGL. Please try with a modern browser.</div>';
+            throw new Error('WebGL not supported');
+        }
+
+        // Main variables
+        let renderer, scene, camera, material, mesh;
+        let mouseX = 0, mouseY = 0;
+        let targetMouseX = 0, targetMouseY = 0;
+        let zoom = 1.0;
+        let targetZoom = 1.0;
+        let zoomCenter = { x: 0.5, y: 0.5 };
+        let isMouseDown = false;
+        let lastClickTime = 0;
+        
+        // UI state
+        const state = {
+            palette: 'vibrant',
+            saturation: 1.0,
+            speed: 0.5,
+            ripple: 0.0,
+            harmony: 'complementary',
+            zoom: 1.0
+        };
+
+        // Initialize Three.js
+        function init() {
+            // Create renderer
+            const container = document.getElementById('canvas-container');
+            const width = Math.min(window.innerWidth, 1200);
+            const height = width * (9/16);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            // Create scene
+            scene = new THREE.Scene();
+
+            // Create camera (orthographic for 2D)
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
+            scene.add(camera);
+
+            // Create shader material
+            material = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 0 },
+                    resolution: { value: new THREE.Vector2(width, height) },
+                    mouse: { value: new THREE.Vector2(0.5, 0.5) },
+                    targetMouse: { value: new THREE.Vector2(0.5, 0.5) },
+                    zoom: { value: 1.0 },
+                    zoomCenter: { value: new THREE.Vector2(0.5, 0.5) },
+                    palette: { value: 0 }, // 0 = vibrant, 1 = muted
+                    saturation: { value: 1.0 },
+                    speed: { value: 0.5 },
+                    ripple: { value: 0.0 },
+                    harmony: { value: 0.0 },
+                    clickTime: { value: 0 },
+                    clickPos: { value: new THREE.Vector2(0.5, 0.5) }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                precision highp float;
+                
+                uniform float time;
+                uniform vec2 resolution;
+                uniform vec2 mouse;
+                uniform vec2 targetMouse;
+                uniform float zoom;
+                uniform vec2 zoomCenter;
+                uniform float palette;
+                uniform float saturation;
+                uniform float speed;
+                uniform float ripple;
+                uniform float harmony;
+                uniform float clickTime;
+                uniform vec2 clickPos;
+                
+                varying vec2 vUv;
+                
+                // Smooth interpolation function
+                float smoothInterp(float t) {
+                    return t * t * (3.0 - 2.0 * t);
+                }
+                
+                // Color palette function - RENAMED to avoid conflict with uniform
+                vec3 getPalette(float t, vec3 a, vec3 b, vec3 c, vec3 d) {
+                    return a + b * cos(6.28318 * (c * t + d));
+                }
+                
+                // Vibrant color palettes
+                vec3 vibrantPalette(float t) {
+                    if (harmony < 0.5) {
+                        // Complementary
+                        return getPalette(t, 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(1.0, 1.0, 1.0), 
+                            vec3(0.0, 0.33, 0.67));
+                    } else if (harmony < 1.5) {
+                        // Analogous
+                        return getPalette(t, 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(1.0, 1.0, 1.0), 
+                            vec3(0.0, 0.1, 0.2));
+                    } else {
+                        // Triadic
+                        return getPalette(t, 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(1.0, 1.0, 1.0), 
+                            vec3(0.0, 0.33, 0.67));
+                    }
+                }
+                
+                // Muted color palettes
+                vec3 mutedPalette(float t) {
+                    if (harmony < 0.5) {
+                        // Complementary
+                        return getPalette(t, 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(0.2, 0.2, 0.2), 
+                            vec3(1.0, 1.0, 1.0), 
+                            vec3(0.0, 0.33, 0.67));
+                    } else if (harmony < 1.5) {
+                        // Analogous
+                        return getPalette(t, 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(0.2, 0.2, 0.2), 
+                            vec3(1.0, 1.0, 1.0), 
+                            vec3(0.0, 0.1, 0.2));
+                    } else {
+                        // Triadic
+                        return getPalette(t, 
+                            vec3(0.5, 0.5, 0.5), 
+                            vec3(0.2, 0.2, 0.2), 
+                            vec3(1.0, 1.0, 1.0), 
+                            vec3(0.0, 0.33, 0.67));
+                    }
+                }
+                
+                // Ripple effect
+                float rippleEffect(vec2 uv, vec2 center, float time) {
+                    float dist = distance(uv, center);
+                    return sin(dist * 20.0 - time * 5.0) * 0.5 + 0.5;
+                }
+                
+                void main() {
+                    // Apply zoom transformation
+                    vec2 uv = (vUv - zoomCenter) / zoom + zoomCenter;
+                    
+                    // Smooth mouse movement
+                    vec2 smoothMouse = mix(mouse, targetMouse, 0.1);
+                    
+                    // Calculate gradient based on mouse position
+                    float gradientX = smoothMouse.x * 2.0 - 1.0;
+                    float gradientY = smoothMouse.y * 2.0 - 1.0;
+                    
+                    // Create dynamic gradient
+                    float t = (uv.x * 0.5 + uv.y * 0.5) * 0.5 + 
+                            (uv.x * gradientX + uv.y * gradientY) * 0.5 + 
+                            time * 0.1 * speed;
+                    
+                    // Select color based on palette
+                    vec3 color;
+                    if (palette < 0.5) {
+                        color = vibrantPalette(t);
+                    } else {
+                        color = mutedPalette(t);
+                    }
+                    
+                    // Apply saturation
+                    float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+                    color = mix(vec3(luminance), color, saturation);
+                    
+                    // Apply ripple effect if enabled
+                    if (ripple > 0.0) {
+                        float rippleFactor = rippleEffect(uv, clickPos, clickTime) * ripple;
+                        color = mix(color, color * 1.5, rippleFactor);
+                    }
+                    
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `,
+                transparent: false
+            });
+
+            // Create fullscreen quad
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+            renderer.domElement.addEventListener('mousedown', onMouseDown);
+            renderer.domElement.addEventListener('mouseup', onMouseUp);
+            renderer.domElement.addEventListener('click', onClick);
+            renderer.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
+
+            // UI event listeners
+            document.getElementById('vibrant').addEventListener('click', () => setPalette('vibrant'));
+            document.getElementById('muted').addEventListener('click', () => setPalette('muted'));
+            document.getElementById('saturation').addEventListener('input', (e) => {
+                state.saturation = parseFloat(e.target.value);
+                document.getElementById('saturation-value').textContent = state.saturation.toFixed(1);
+                material.uniforms.saturation.value = state.saturation;
+            });
+            document.getElementById('speed').addEventListener('input', (e) => {
+                state.speed = parseFloat(e.target.value);
+                document.getElementById('speed-value').textContent = state.speed.toFixed(1);
+                material.uniforms.speed.value = state.speed;
+            });
+            document.getElementById('ripple').addEventListener('input', (e) => {
+                state.ripple = parseFloat(e.target.value);
+                document.getElementById('ripple-value').textContent = state.ripple.toFixed(1);
+                material.uniforms.ripple.value = state.ripple;
+            });
+            document.getElementById('complementary').addEventListener('click', () => setHarmony('complementary'));
+            document.getElementById('analogous').addEventListener('click', () => setHarmony('analogous'));
+            document.getElementById('triadic').addEventListener('click', () => setHarmony('triadic'));
+            document.getElementById('zoom').addEventListener('input', (e) => {
+                state.zoom = parseFloat(e.target.value);
+                document.getElementById('zoom-value').textContent = state.zoom.toFixed(1);
+                targetZoom = state.zoom;
+            });
+            document.getElementById('toggle-ui').addEventListener('click', () => {
+                const ui = document.getElementById('ui');
+                ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
+            });
+
+            // Start animation loop
+            animate();
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update time
+            material.uniforms.time.value += 0.01;
+            
+            // Smooth mouse movement
+            material.uniforms.mouse.value.lerp(material.uniforms.targetMouse.value, 0.1);
+            
+            // Smooth zoom
+            zoom = zoom * 0.9 + targetZoom * 0.1;
+            material.uniforms.zoom.value = zoom;
+            
+            // Render
+            renderer.render(scene, camera);
+        }
+
+        // Window resize handler
+        function onWindowResize() {
+            const width = Math.min(window.innerWidth, 1200);
+            const height = width * (9/16);
+            
+            renderer.setSize(width, height);
+            material.uniforms.resolution.value.set(width, height);
+            
+            // Adjust camera for orthographic projection
+            camera.left = -width / height;
+            camera.right = width / height;
+            camera.top = 1;
+            camera.bottom = -1;
+            camera.updateProjectionMatrix();
+        }
+
+        // Mouse move handler
+        function onMouseMove(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouseX = (event.clientX - rect.left) / rect.width;
+            mouseY = (event.clientY - rect.top) / rect.height;
+            
+            targetMouseX = mouseX;
+            targetMouseY = mouseY;
+            
+            material.uniforms.targetMouse.value.set(mouseX, mouseY);
+        }
+
+        // Touch move handler
+        function onTouchMove(event) {
+            event.preventDefault();
+            const rect = renderer.domElement.getBoundingClientRect();
+            const touch = event.touches[0];
+            mouseX = (touch.clientX - rect.left) / rect.width;
+            mouseY = (touch.clientY - rect.top) / rect.height;
+            
+            targetMouseX = mouseX;
+            targetMouseY = mouseY;
+            
+            material.uniforms.targetMouse.value.set(mouseX, mouseY);
+        }
+
+        // Mouse down handler
+        function onMouseDown() {
+            isMouseDown = true;
+        }
+
+        // Mouse up handler
+        function onMouseUp() {
+            isMouseDown = false;
+        }
+
+        // Click handler
+        function onClick(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const clickX = (event.clientX - rect.left) / rect.width;
+            const clickY = (event.clientY - rect.top) / rect.height;
+            
+            material.uniforms.clickPos.value.set(clickX, clickY);
+            material.uniforms.clickTime.value = performance.now() / 1000;
+        }
+
+        // Mouse wheel handler for zoom
+        function onMouseWheel(event) {
+            event.preventDefault();
+            
+            // Get mouse position in normalized coordinates
+            const rect = renderer.domElement.getBoundingClientRect();
+            const mouseX = (event.clientX - rect.left) / rect.width;
+            const mouseY = (event.clientY - rect.top) / rect.height;
+            
+            // Calculate zoom factor
+            const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1;
+            targetZoom = Math.min(Math.max(targetZoom * zoomFactor, 0.1), 5.0);
+            
+            // Update zoom center based on mouse position
+            zoomCenter.x = mouseX;
+            zoomCenter.y = mouseY;
+            material.uniforms.zoomCenter.value.set(zoomCenter.x, zoomCenter.y);
+            
+            // Update UI
+            state.zoom = targetZoom;
+            document.getElementById('zoom').value = targetZoom;
+            document.getElementById('zoom-value').textContent = targetZoom.toFixed(1);
+        }
+
+        // Set color palette
+        function setPalette(type) {
+            state.palette = type;
+            document.getElementById('vibrant').classList.remove('active');
+            document.getElementById('muted').classList.remove('active');
+            document.getElementById(type).classList.add('active');
+            
+            material.uniforms.palette.value = type === 'vibrant' ? 0 : 1;
+        }
+
+        // Set color harmony
+        function setHarmony(type) {
+            state.harmony = type;
+            document.getElementById('complementary').classList.remove('active');
+            document.getElementById('analogous').classList.remove('active');
+            document.getElementById('triadic').classList.remove('active');
+            document.getElementById(type).classList.add('active');
+            
+            if (type === 'complementary') {
+                material.uniforms.harmony.value = 0;
+            } else if (type === 'analogous') {
+                material.uniforms.harmony.value = 1;
+            } else {
+                material.uniforms.harmony.value = 2;
+            }
+        }
+
+        // Initialize the application
+        init();
+    </script>
+
+              
+          
+                
+          
+              
